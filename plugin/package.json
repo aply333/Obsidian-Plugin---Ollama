@@ -1,0 +1,16 @@
+{
+  "name": "ollama-runtime-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Obsidian plugin frontend for a local Ollama runtime.",
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --outfile=main.js --format=cjs --platform=browser --target=es2020 --external:obsidian",
+    "dev": "esbuild src/main.ts --bundle --outfile=main.js --format=cjs --platform=browser --target=es2020 --external:obsidian --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "esbuild": "^0.25.10",
+    "obsidian": "^1.8.10",
+    "typescript": "^5.9.2"
+  }
+}
