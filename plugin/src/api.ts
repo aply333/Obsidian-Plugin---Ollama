@@ -2,6 +2,7 @@ export interface RuntimeHealth {
   status: string;
   ollama_reachable: boolean;
   database_ready: boolean;
+  indexing?: boolean;
 }
 
 export class RuntimeRequestError extends Error {

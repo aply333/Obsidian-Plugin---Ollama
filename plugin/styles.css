@@ -6,42 +6,22 @@
 .ollama-shell {
     position: relative;
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr);
-    gap: 12px;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px;
     height: 100%;
     min-height: 0;
 }
 
-.ollama-shell__workspace-header,
 .ollama-shell__reference-dialog-head,
 .ollama-shell__composer-actions,
 .ollama-shell__tool-header,
-.ollama-shell__tool-panel-head,
-.ollama-shell__chat-header {
+.ollama-shell__tool-panel-head {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
 }
 
-.ollama-shell__workspace-header {
-    border: 1px solid var(--background-modifier-border);
-    border-radius: 18px;
-    padding: 16px 18px;
-    background:
-        radial-gradient(
-            circle at top left,
-            rgba(90, 150, 110, 0.16),
-            transparent 34%
-        ),
-        linear-gradient(
-            135deg,
-            color-mix(in srgb, var(--background-secondary) 88%, transparent),
-            var(--background-primary)
-        );
-}
-
-.ollama-shell__workspace-header h2,
 .ollama-shell__chat-header h3,
 .ollama-shell__panel h3,
 .ollama-shell__context-section h3,
@@ -49,28 +29,33 @@
     margin: 0;
 }
 
-.ollama-shell__workspace-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-left: auto;
-}
-
-.ollama-shell__workspace-actions .ollama-shell__actions {
-    justify-content: flex-end;
-}
-
 .ollama-shell__tabs {
     display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    align-self: start;
+    padding: 6px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 18px;
+    background: linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--background-secondary) 90%, transparent),
+        var(--background-primary)
+    );
+}
+
+.ollama-shell__tab-group {
+    display: flex;
+    align-items: center;
     gap: 8px;
-    border-bottom: 1px solid var(--background-modifier-border);
-    padding-bottom: 10px;
 }
 
 .ollama-shell__tab {
     border-radius: 999px;
-    padding: 6px 14px;
+    padding: 8px 16px;
     background: transparent;
+    border: 1px solid transparent;
 }
 
 .ollama-shell__tab--active {
@@ -84,10 +69,20 @@
         var(--interactive-accent) 40%,
         transparent
     );
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.ollama-shell__tab-action {
+    margin-left: 0;
+}
+
+.ollama-shell__tab-action.mod-cta {
+    margin-left: auto;
 }
 
 .ollama-shell__main {
     min-height: 0;
+    overflow: hidden;
 }
 
 .ollama-shell__chat-stage,
@@ -100,8 +95,9 @@
     position: relative;
     display: grid;
     grid-template-rows: auto minmax(0, 1fr) auto;
-    gap: 12px;
+    gap: 10px;
     height: 100%;
+    overflow: hidden;
 }
 
 .ollama-shell__tools-stage,
@@ -112,6 +108,15 @@
     height: 100%;
     overflow: auto;
     padding-right: 4px;
+}
+
+.ollama-shell__tools-stage {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+        "tools"
+        "history"
+        "runtime";
+    align-items: start;
 }
 
 .ollama-shell__panel,
@@ -131,8 +136,39 @@
     align-content: start;
 }
 
+.ollama-shell__panel--tools {
+    grid-area: tools;
+}
+
+.ollama-shell__panel--history {
+    grid-area: history;
+}
+
+.ollama-shell__panel--runtime {
+    grid-area: runtime;
+    position: static;
+}
+
+.ollama-shell__panel--primary {
+    background:
+        radial-gradient(
+            circle at top right,
+            rgba(70, 130, 110, 0.1),
+            transparent 42%
+        ),
+        var(--background-primary);
+}
+
+.ollama-shell__panel-heading {
+    display: grid;
+    gap: 4px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--background-modifier-border);
+}
+
 .ollama-shell__transcript {
     overflow: auto;
+    min-height: 0;
     background:
         linear-gradient(
             180deg,
@@ -146,11 +182,19 @@
     position: sticky;
     bottom: 0;
     z-index: 2;
+    gap: 8px;
+    padding: 10px 12px;
     box-shadow: 0 -8px 24px rgba(0, 0, 0, 0.06);
 }
 
 .ollama-shell__composer--chat .ollama-shell__input {
-    min-height: 64px;
+    height: clamp(56px, 10vh, 110px);
+    min-height: 56px;
+    max-height: 110px;
+}
+
+.ollama-shell__composer--chat .ollama-shell__label {
+    gap: 4px;
 }
 
 .ollama-shell__meta,
@@ -164,6 +208,14 @@
 .ollama-shell__context-section {
     display: grid;
     gap: 10px;
+}
+
+.ollama-shell__meta--runtime-grid {
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.ollama-shell__actions--utility {
+    padding-bottom: 4px;
 }
 
 .ollama-shell__context-grid,
@@ -278,8 +330,14 @@
 .ollama-shell__sql-table th {
     position: sticky;
     top: 0;
-    background: var(--background-primary);
+    background: color-mix(in srgb, var(--interactive-accent) 58%, white 12%);
+    color: white;
     z-index: 1;
+}
+
+.ollama-shell__sql-table td {
+    background: white;
+    color: black;
 }
 
 .ollama-shell__sql-table-wrap {
@@ -296,6 +354,19 @@
 
 .ollama-shell__history-row--active {
     background: color-mix(in srgb, var(--interactive-accent) 10%, transparent);
+}
+
+.ollama-shell__history-table {
+    table-layout: fixed;
+}
+
+.ollama-shell__history-table td:first-child,
+.ollama-shell__history-table th:first-child {
+    width: 46%;
+}
+
+.ollama-shell__history-table td {
+    overflow-wrap: anywhere;
 }
 
 .ollama-shell__plan {
@@ -330,6 +401,69 @@
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+}
+
+.ollama-shell__card-section {
+    padding: 10px 12px;
+    border-radius: 18px;
+    background: var(--background-primary);
+}
+
+.ollama-shell__card-toggle {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    gap: 10px;
+    padding: 6px 4px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+}
+
+.ollama-shell__card-title-wrap {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    flex: 1;
+}
+
+.ollama-shell__card-chevron {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 999px;
+    background: var(--background-secondary);
+    font-weight: 700;
+}
+
+.ollama-shell__card-body {
+    display: grid;
+    gap: 12px;
+    padding-top: 12px;
+}
+
+.ollama-shell__card-subtitle {
+    padding: 0 4px;
+}
+
+.ollama-shell__status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    flex: 0 0 auto;
+    box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 12%, transparent);
+}
+
+.ollama-shell__status-dot--ok {
+    color: var(--color-green);
+    background: var(--color-green);
+}
+
+.ollama-shell__status-dot--error {
+    color: var(--color-red);
+    background: var(--color-red);
 }
 
 .ollama-shell__status-pill {
@@ -466,25 +600,39 @@
 }
 
 .ollama-shell__status {
-    display: flex;
-    justify-content: space-between;
-    gap: 12px;
-    align-items: center;
+    display: grid;
+    gap: 6px;
+    align-items: start;
     font-size: 0.9rem;
     padding: 10px 12px;
     border-radius: 12px;
     background: var(--background-secondary);
 }
 
-.ollama-shell__status--ok code {
+.ollama-shell__status-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.ollama-shell__status-value {
+    font-family: var(--font-monospace);
+    line-height: 1.4;
+    overflow-wrap: anywhere;
+}
+
+.ollama-shell__status--copyable {
+    cursor: pointer;
+}
+
+.ollama-shell__status--ok .ollama-shell__status-value {
     color: var(--color-green);
 }
 
-.ollama-shell__status--warn code {
+.ollama-shell__status--warn .ollama-shell__status-value {
     color: var(--color-orange);
 }
 
-.ollama-shell__status--error code {
+.ollama-shell__status--error .ollama-shell__status-value {
     color: var(--color-red);
 }
 
@@ -590,15 +738,30 @@
 }
 
 @media (max-width: 900px) {
-    .ollama-shell__workspace-header,
+    .ollama-shell__tools-stage {
+        grid-template-columns: 1fr;
+        grid-template-areas:
+            "tools"
+            "runtime"
+            "history";
+    }
+
+    .ollama-shell__panel--runtime {
+        position: static;
+    }
+
     .ollama-shell__composer-actions,
-    .ollama-shell__chat-header {
+    .ollama-shell__tabs {
         align-items: flex-start;
         flex-direction: column;
     }
 
-    .ollama-shell__workspace-actions {
+    .ollama-shell__tab-group {
         width: 100%;
+        flex-wrap: wrap;
+    }
+
+    .ollama-shell__tab-action {
         margin-left: 0;
     }
 

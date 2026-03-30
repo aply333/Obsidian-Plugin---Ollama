@@ -1,7 +1,7 @@
 {
   "process_state": "running",
   "health_state": "ok",
-  "pid": 1199,
+  "pid": 12210,
   "detail": "Runtime is running and Ollama is reachable.",
-  "updated_at": 1774824171.31583
+  "updated_at": 1774840987.217215
 }

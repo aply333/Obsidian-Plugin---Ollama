@@ -29,6 +29,7 @@ class HealthResponse(BaseModel):
     status: str
     ollama_reachable: bool
     database_ready: bool = True
+    indexing: bool = False
 
 
 class GenerateRequest(BaseModel):
@@ -258,6 +259,9 @@ class ContextMetaResponse(BaseModel):
 
 app = FastAPI(title="Ollama Runtime", version="0.1.0")
 
+OLLAMA_REACHABLE = False
+INDEXING_ACTIVE = False
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -269,11 +273,21 @@ app.add_middleware(
 
 @app.on_event("startup")
 async def startup() -> None:
+    global OLLAMA_REACHABLE
     await run_in_threadpool(ensure_db)
+    OLLAMA_REACHABLE = await run_in_threadpool(check_ollama_reachable)
 
 
 def get_client() -> ollama.Client:
     return ollama.Client()
+
+
+def check_ollama_reachable() -> bool:
+    client = get_client()
+    with suppress(Exception):
+        client.ps()
+        return True
+    return False
 
 
 def build_quick_entry_prompt(
@@ -544,20 +558,13 @@ def parse_agent_action_plan_response(raw_text: str) -> AgentActionPlanResponse:
 
 @app.get("/health", response_model=HealthResponse)
 async def health() -> HealthResponse:
-    client = get_client()
-
-    with suppress(Exception):
-        await run_in_threadpool(client.ps)
-        return HealthResponse(
-            status="ok",
-            ollama_reachable=True,
-            database_ready=DB_PATH.exists(),
-        )
-
     return HealthResponse(
-        status="degraded",
-        ollama_reachable=False,
+        status="busy"
+        if INDEXING_ACTIVE
+        else ("ok" if OLLAMA_REACHABLE else "degraded"),
+        ollama_reachable=OLLAMA_REACHABLE,
         database_ready=DB_PATH.exists(),
+        indexing=INDEXING_ACTIVE,
     )
 
 
@@ -581,7 +588,10 @@ async def context_sync(payload: ContextSyncRequest) -> ContextSyncResponse:
 
 @app.post("/context/index", response_model=ContextIndexResponse)
 async def context_index(payload: ContextIndexRequest) -> ContextIndexResponse:
+    global INDEXING_ACTIVE, OLLAMA_REACHABLE
     try:
+        INDEXING_ACTIVE = True
+        OLLAMA_REACHABLE = await run_in_threadpool(check_ollama_reachable)
         existing_categories = await run_in_threadpool(get_existing_ai_category_names)
         if payload.vault_path.strip():
             indexed = await run_in_threadpool(
@@ -613,6 +623,8 @@ async def context_index(payload: ContextIndexRequest) -> ContextIndexResponse:
             status_code=500,
             detail=f"Failed to index vault into SQLite: {exc}",
         ) from exc
+    finally:
+        INDEXING_ACTIVE = False
 
     return ContextIndexResponse(
         indexed_at=indexed["indexed_at"],
@@ -630,6 +642,7 @@ async def context_index(payload: ContextIndexRequest) -> ContextIndexResponse:
 async def context_reindex(
     payload: ContextReindexRequest,
 ) -> ContextReindexResponse:
+    global INDEXING_ACTIVE, OLLAMA_REACHABLE
     vault_path = payload.vault_path.strip() or await run_in_threadpool(
         get_last_vault_path
     )
@@ -644,6 +657,8 @@ async def context_reindex(
         )
 
     try:
+        INDEXING_ACTIVE = True
+        OLLAMA_REACHABLE = await run_in_threadpool(check_ollama_reachable)
         indexed_at = time.time_ns() // 1_000_000
         existing_categories = await run_in_threadpool(get_existing_ai_category_names)
         indexed = await run_in_threadpool(
@@ -667,6 +682,8 @@ async def context_reindex(
             status_code=500,
             detail=f"Failed to reindex vault from stored path: {exc}",
         ) from exc
+    finally:
+        INDEXING_ACTIVE = False
 
     return ContextReindexResponse(
         indexed_at=indexed["indexed_at"],

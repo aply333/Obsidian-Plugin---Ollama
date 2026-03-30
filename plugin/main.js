@@ -771,6 +771,16 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     super(leaf);
     this.active_stream_controller = null;
     this.active_tab = "chat";
+    this.section_open = {
+      history: true,
+      runtime: true,
+      context_overview: true,
+      context_vault_notes: true,
+      context_folder_intent: true,
+      context_manual: true,
+      context_categories: true,
+      context_tables: false
+    };
     this.prompt = "";
     this.manual_context_text = "";
     this.note_search_text = "";
@@ -792,6 +802,7 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     this.context_tables = null;
     this.context_tables_loading = false;
     this.is_busy = false;
+    this.health_check_inflight = false;
     this.plugin = plugin;
   }
   getViewType() {
@@ -829,14 +840,6 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     this.renderWorkspace(shell, active_chat);
   }
   renderWorkspace(container, active_chat) {
-    const header = container.createDiv({
-      cls: "ollama-shell__workspace-header"
-    });
-    header.createEl("h2", { text: active_chat?.title ?? "Ollama Runtime" });
-    const header_actions = header.createDiv({
-      cls: "ollama-shell__workspace-actions"
-    });
-    this.renderQuickActions(header_actions, active_chat);
     if (this.error_text) {
       container.createDiv({
         cls: "ollama-shell__banner ollama-shell__banner--error",
@@ -844,13 +847,14 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
       });
     }
     const tab_row = container.createDiv({ cls: "ollama-shell__tabs" });
+    const tab_group = tab_row.createDiv({ cls: "ollama-shell__tab-group" });
     const tabs = [
       { id: "chat", label: "Chat" },
       { id: "tools", label: "Tools" },
       { id: "context", label: "Context" }
     ];
     for (const tab of tabs) {
-      const button = tab_row.createEl("button", {
+      const button = tab_group.createEl("button", {
         text: tab.label,
         cls: `ollama-shell__tab${this.active_tab === tab.id ? " ollama-shell__tab--active" : ""}`
       });
@@ -862,6 +866,26 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
         this.render();
       });
     }
+    const new_chat_button = tab_row.createEl("button", {
+      text: "New Chat",
+      cls: "ollama-shell__tab-action mod-cta"
+    });
+    new_chat_button.disabled = this.is_busy;
+    new_chat_button.addEventListener("click", () => {
+      this.active_tab = "chat";
+      void this.plugin.createChatSession();
+    });
+    const quick_entry_button = tab_row.createEl("button", {
+      text: "Q+",
+      cls: "ollama-shell__tab-action"
+    });
+    quick_entry_button.disabled = this.is_busy;
+    quick_entry_button.addEventListener("click", () => {
+      this.active_tab = "tools";
+      this.active_tool_panel = "quick_entry";
+      this.quick_action_menu_open = false;
+      this.render();
+    });
     const main = container.createDiv({ cls: "ollama-shell__main" });
     if (this.active_tab === "chat") {
       this.renderChatStage(main, active_chat);
@@ -873,70 +897,8 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     }
     this.renderContextStage(main);
   }
-  renderQuickActions(container, active_chat) {
-    const action_row = container.createDiv({ cls: "ollama-shell__actions" });
-    const new_chat_button = container.createEl("button", {
-      text: "New Chat",
-      cls: "mod-cta"
-    });
-    new_chat_button.disabled = this.is_busy;
-    new_chat_button.addEventListener("click", () => {
-      void this.plugin.createChatSession();
-    });
-    const use_active_button = action_row.createEl("button", {
-      text: "Use Active Note"
-    });
-    use_active_button.disabled = this.is_busy || !active_chat;
-    use_active_button.addEventListener("click", () => {
-      void this.attachActiveFile();
-    });
-    const reindex_button = action_row.createEl("button", {
-      text: "Reindex Vault"
-    });
-    reindex_button.disabled = this.is_busy;
-    reindex_button.addEventListener("click", () => {
-      void this.reindexVault();
-    });
-    const handoff_button = action_row.createEl("button", {
-      text: "Chat Handoff"
-    });
-    handoff_button.disabled = this.is_busy || !active_chat;
-    handoff_button.addEventListener("click", () => {
-      void this.exportHandoff();
-    });
-    const health_button = action_row.createEl("button", {
-      text: "Check Runtime"
-    });
-    health_button.disabled = this.is_busy;
-    health_button.addEventListener("click", () => {
-      void this.refreshHealth();
-    });
-  }
   renderChatStage(container, active_chat) {
     container.addClass("ollama-shell__chat-stage");
-    const chat_header = container.createDiv({
-      cls: "ollama-shell__chat-header"
-    });
-    chat_header.createEl("h3", { text: "Chat Log" });
-    const chat_actions = chat_header.createDiv({
-      cls: "ollama-shell__actions"
-    });
-    const add_context_button = chat_actions.createEl("button", {
-      text: "Add Context"
-    });
-    add_context_button.disabled = this.is_busy || !active_chat;
-    add_context_button.addEventListener("click", () => {
-      this.reference_picker_open = !this.reference_picker_open;
-      this.render();
-    });
-    const new_chat_button = chat_actions.createEl("button", {
-      text: "New Chat",
-      cls: "mod-cta"
-    });
-    new_chat_button.disabled = this.is_busy;
-    new_chat_button.addEventListener("click", () => {
-      void this.plugin.createChatSession();
-    });
     if (this.reference_picker_open) {
       this.renderReferencePicker(container, active_chat);
     }
@@ -949,15 +911,71 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
   }
   renderToolsStage(container, active_chat) {
     container.addClass("ollama-shell__tools-stage");
-    const tools_panel = container.createDiv({ cls: "ollama-shell__panel" });
-    tools_panel.createEl("h3", { text: "Management Tools" });
+    const tools_panel = container.createDiv({
+      cls: "ollama-shell__panel ollama-shell__panel--tools ollama-shell__panel--primary"
+    });
+    this.renderPanelHeading(
+      tools_panel,
+      "Management Tools",
+      "Quick entry and action plans for moving work into the vault."
+    );
+    const utility_actions = tools_panel.createDiv({
+      cls: "ollama-shell__actions ollama-shell__actions--utility"
+    });
+    const use_active_button = utility_actions.createEl("button", {
+      text: "Use Active Note"
+    });
+    use_active_button.disabled = this.is_busy || !active_chat;
+    use_active_button.addEventListener("click", () => {
+      void this.attachActiveFile();
+    });
+    const handoff_button = utility_actions.createEl("button", {
+      text: "Chat Handoff"
+    });
+    handoff_button.disabled = this.is_busy || !active_chat;
+    handoff_button.addEventListener("click", () => {
+      void this.exportHandoff();
+    });
+    const reindex_button = utility_actions.createEl("button", {
+      text: "Reindex Vault"
+    });
+    reindex_button.disabled = this.is_busy;
+    reindex_button.addEventListener("click", () => {
+      void this.reindexVault();
+    });
+    const health_button = utility_actions.createEl("button", {
+      text: "Check Runtime"
+    });
+    health_button.disabled = this.is_busy;
+    health_button.addEventListener("click", () => {
+      void this.refreshHealth();
+    });
     this.renderChatTools(tools_panel, active_chat);
-    const history_panel = container.createDiv({ cls: "ollama-shell__panel" });
-    history_panel.createEl("h3", { text: "History" });
-    this.renderHistoryTab(history_panel, active_chat);
-    const runtime_panel = container.createDiv({ cls: "ollama-shell__panel" });
-    runtime_panel.createEl("h3", { text: "Runtime" });
-    this.renderRuntimeTab(runtime_panel, active_chat);
+    const history_panel = container.createDiv({
+      cls: "ollama-shell__panel ollama-shell__panel--history"
+    });
+    this.renderCollapsibleCard(
+      history_panel,
+      "history",
+      "History",
+      "Recent chats, their starting prompts, and message counts.",
+      (body) => {
+        this.renderHistoryTab(body, active_chat);
+      }
+    );
+    const runtime_panel = container.createDiv({
+      cls: "ollama-shell__panel ollama-shell__panel--runtime"
+    });
+    this.renderCollapsibleCard(
+      runtime_panel,
+      "runtime",
+      "Runtime",
+      "Connection details, model state, and indexing controls.",
+      (body) => {
+        this.renderRuntimeTab(body, active_chat);
+      },
+      this.renderStatusDot()
+    );
   }
   renderContextStage(container) {
     container.addClass("ollama-shell__context-stage");
@@ -987,7 +1005,9 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     }
   }
   renderRuntimeTab(container, active_chat) {
-    const details = container.createDiv({ cls: "ollama-shell__meta" });
+    const details = container.createDiv({
+      cls: "ollama-shell__meta ollama-shell__meta--runtime-grid"
+    });
     this.renderMetaRow(details, "Runtime URL", this.plugin.settings.runtimeUrl);
     this.renderMetaRow(
       details,
@@ -1056,214 +1076,220 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     });
   }
   renderContextTab(container) {
-    const overview_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    overview_section.createEl("h3", { text: "Current Runtime Context" });
-    const overview_grid = overview_section.createDiv({
-      cls: "ollama-shell__context-grid"
-    });
-    this.renderContextStat(
-      overview_grid,
-      "Effective model",
-      this.plugin.getActiveChat()?.model_override.trim() || this.plugin.settings.defaultModel
-    );
-    this.renderContextStat(
-      overview_grid,
-      "Indexed notes",
-      `${this.context_meta?.note_count ?? this.plugin.vault_index.markdown_file_count}`
-    );
-    this.renderContextStat(
-      overview_grid,
-      "Last indexed",
-      this.context_meta?.last_indexed_at ? new Date(Number(this.context_meta.last_indexed_at)).toLocaleString() : "Unknown"
-    );
-    this.renderContextStat(
-      overview_grid,
-      "Vault path",
-      this.context_meta?.last_vault_path ?? "Not stored"
-    );
-    const generated_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    generated_section.createEl("h3", { text: "Vault Notes" });
-    generated_section.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "Generated from indexing. Read-only snapshot of the vault context currently sent to the runtime."
-    });
-    const summary_block = generated_section.createDiv({
-      cls: "ollama-shell__context-block"
-    });
-    summary_block.createEl("h4", { text: "Vault Summary" });
-    summary_block.createEl("pre", {
-      cls: "ollama-shell__context-pre",
-      text: this.plugin.getVaultSummary()
-    });
-    const map_block = generated_section.createDiv({
-      cls: "ollama-shell__context-block"
-    });
-    map_block.createEl("h4", { text: "Vault Map" });
-    map_block.createEl("pre", {
-      cls: "ollama-shell__context-pre ollama-shell__context-pre--map",
-      text: JSON.stringify(this.plugin.getVaultMap(), null, 2)
-    });
-    const folder_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    folder_section.createEl("h3", { text: "Folder Intent Map" });
-    folder_section.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "High-level intent summaries built from the indexed vault."
-    });
-    const top_folders = this.plugin.getVaultMap()?.top_folders ?? [];
-    if (!top_folders.length) {
-      folder_section.createDiv({
-        cls: "ollama-shell__empty-state ollama-shell__empty-state--compact",
-        text: "No folder intent data is available yet. Reindex the runtime to populate it."
-      });
-    } else {
-      const folder_grid = folder_section.createDiv({
-        cls: "ollama-shell__folder-grid"
-      });
-      for (const folder of top_folders) {
-        const card = folder_grid.createDiv({
-          cls: "ollama-shell__folder-card"
+    this.renderCollapsibleCard(
+      container,
+      "context_overview",
+      "Current Runtime Context",
+      "Current model, index timing, and vault source.",
+      (body) => {
+        const overview_grid = body.createDiv({
+          cls: "ollama-shell__context-grid"
         });
-        card.createEl("strong", { text: folder.folder });
-        card.createEl("div", {
-          cls: "ollama-shell__message-meta",
-          text: `${folder.note_count} notes`
+        this.renderContextStat(
+          overview_grid,
+          "Effective model",
+          this.plugin.getActiveChat()?.model_override.trim() || this.plugin.settings.defaultModel
+        );
+        this.renderContextStat(
+          overview_grid,
+          "Indexed notes",
+          `${this.context_meta?.note_count ?? this.plugin.vault_index.markdown_file_count}`
+        );
+        this.renderContextStat(
+          overview_grid,
+          "Last indexed",
+          this.context_meta?.last_indexed_at ? new Date(
+            Number(this.context_meta.last_indexed_at)
+          ).toLocaleString() : "Unknown"
+        );
+        this.renderContextStat(
+          overview_grid,
+          "Vault path",
+          this.context_meta?.last_vault_path ?? "Not stored"
+        );
+      }
+    );
+    this.renderCollapsibleCard(
+      container,
+      "context_vault_notes",
+      "Vault Notes",
+      "Generated summary and structured map currently sent to the runtime.",
+      (body) => {
+        const summary_block = body.createDiv({
+          cls: "ollama-shell__context-block"
         });
-        if (folder.intent) {
-          card.createEl("div", {
-            cls: "ollama-shell__folder-intent",
-            text: folder.intent
+        summary_block.createEl("h4", { text: "Vault Summary" });
+        summary_block.createEl("pre", {
+          cls: "ollama-shell__context-pre",
+          text: this.plugin.getVaultSummary()
+        });
+        const map_block = body.createDiv({
+          cls: "ollama-shell__context-block"
+        });
+        map_block.createEl("h4", { text: "Vault Map" });
+        map_block.createEl("pre", {
+          cls: "ollama-shell__context-pre ollama-shell__context-pre--map",
+          text: JSON.stringify(this.plugin.getVaultMap(), null, 2)
+        });
+      }
+    );
+    this.renderCollapsibleCard(
+      container,
+      "context_folder_intent",
+      "Folder Intent Map",
+      "High-level intent summaries built from the indexed vault.",
+      (body) => {
+        const top_folders = this.plugin.getVaultMap()?.top_folders ?? [];
+        if (!top_folders.length) {
+          body.createDiv({
+            cls: "ollama-shell__empty-state ollama-shell__empty-state--compact",
+            text: "No folder intent data is available yet. Reindex the runtime to populate it."
           });
+          return;
         }
-        if (folder.top_topics.length) {
-          const chips = card.createDiv({ cls: "ollama-shell__chip-row" });
-          for (const topic of folder.top_topics.slice(0, 4)) {
-            chips.createEl("span", {
-              cls: "ollama-shell__chip",
-              text: topic
+        const folder_grid = body.createDiv({
+          cls: "ollama-shell__folder-grid"
+        });
+        for (const folder of top_folders) {
+          const card = folder_grid.createDiv({
+            cls: "ollama-shell__folder-card"
+          });
+          card.createEl("strong", { text: folder.folder });
+          card.createEl("div", {
+            cls: "ollama-shell__message-meta",
+            text: `${folder.note_count} notes`
+          });
+          if (folder.intent) {
+            card.createEl("div", {
+              cls: "ollama-shell__folder-intent",
+              text: folder.intent
             });
+          }
+          if (folder.top_topics.length) {
+            const chips = card.createDiv({ cls: "ollama-shell__chip-row" });
+            for (const topic of folder.top_topics.slice(0, 4)) {
+              chips.createEl("span", {
+                cls: "ollama-shell__chip",
+                text: topic
+              });
+            }
           }
         }
       }
-    }
-    const manual_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    manual_section.createEl("h3", { text: "Manual Instructions" });
-    manual_section.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "Persistent steering context. One item per line, included with every prompt."
-    });
-    const manual_block = manual_section.createDiv({
-      cls: "ollama-shell__context-block"
-    });
-    manual_block.createEl("h4", { text: "Instructions" });
-    manual_block.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "Examples: preferred tone, important vault themes, recurring projects, or guidance on how the assistant should summarize."
-    });
-    const manual_input = manual_block.createEl("textarea", {
-      cls: "ollama-shell__input ollama-shell__input--compact"
-    });
-    manual_input.placeholder = "This vault focuses on job search, product ideas, blog drafts, and weekly priorities.";
-    manual_input.value = this.manual_context_text;
-    manual_input.disabled = this.is_busy;
-    manual_input.addEventListener("input", () => {
-      this.manual_context_text = manual_input.value;
-    });
-    const manual_actions = manual_block.createDiv({
-      cls: "ollama-shell__actions"
-    });
-    const save_button = manual_actions.createEl("button", {
-      text: "Save Context",
-      cls: "mod-cta"
-    });
-    save_button.disabled = this.is_busy;
-    save_button.addEventListener("click", () => {
-      void this.saveManualContext();
-    });
-    const clear_button = manual_actions.createEl("button", {
-      text: "Clear"
-    });
-    clear_button.disabled = this.is_busy;
-    clear_button.addEventListener("click", () => {
-      this.manual_context_text = "";
-      void this.saveManualContext();
-    });
-    const tables_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    const category_section = container.createDiv({
-      cls: "ollama-shell__context-section"
-    });
-    category_section.createEl("h3", { text: "Category Coverage" });
-    category_section.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "Top runtime categories and their current note membership counts."
-    });
-    const category_rows = this.context_tables?.categories.filter((row) => row.source === "ai").slice(0, 8) ?? [];
-    if (!category_rows.length) {
-      category_section.createDiv({
-        cls: "ollama-shell__empty-state ollama-shell__empty-state--compact",
-        text: "No category data loaded yet. Refresh the SQL tables or reindex the runtime."
-      });
-    } else {
-      const category_grid = category_section.createDiv({
-        cls: "ollama-shell__context-grid"
-      });
-      for (const row of category_rows) {
-        const card = category_grid.createDiv({
-          cls: "ollama-shell__context-stat ollama-shell__context-stat--category"
+    );
+    this.renderCollapsibleCard(
+      container,
+      "context_manual",
+      "Manual Instructions",
+      "Persistent steering context included with every prompt.",
+      (body) => {
+        const manual_block = body.createDiv({
+          cls: "ollama-shell__context-block"
         });
-        card.createEl("span", {
+        manual_block.createEl("h4", { text: "Instructions" });
+        manual_block.createEl("p", {
           cls: "ollama-shell__message-meta",
-          text: "Category"
+          text: "Examples: preferred tone, important vault themes, recurring projects, or guidance on how the assistant should summarize."
         });
-        card.createEl("div", {
-          cls: "ollama-shell__context-stat-value",
-          text: this.formatSqlCell(row.name)
+        const manual_input = manual_block.createEl("textarea", {
+          cls: "ollama-shell__input ollama-shell__input--compact"
         });
-        card.createEl("div", {
-          cls: "ollama-shell__message-meta",
-          text: `${this.formatSqlCell(row.count)} notes`
+        manual_input.placeholder = "This vault focuses on job search, product ideas, blog drafts, and weekly priorities.";
+        manual_input.value = this.manual_context_text;
+        manual_input.disabled = this.is_busy;
+        manual_input.addEventListener("input", () => {
+          this.manual_context_text = manual_input.value;
+        });
+        const manual_actions = manual_block.createDiv({
+          cls: "ollama-shell__actions"
+        });
+        const save_button = manual_actions.createEl("button", {
+          text: "Save Context",
+          cls: "mod-cta"
+        });
+        save_button.disabled = this.is_busy;
+        save_button.addEventListener("click", () => {
+          void this.saveManualContext();
+        });
+        const clear_button = manual_actions.createEl("button", {
+          text: "Clear"
+        });
+        clear_button.disabled = this.is_busy;
+        clear_button.addEventListener("click", () => {
+          this.manual_context_text = "";
+          void this.saveManualContext();
         });
       }
-    }
-    tables_section.createEl("h3", { text: "SQLite Tables" });
-    tables_section.createEl("p", {
-      cls: "ollama-shell__message-meta",
-      text: "Live snapshots from the runtime database."
-    });
-    const refresh_button = tables_section.createEl("button", {
-      text: this.context_tables_loading ? "Refreshing..." : "Refresh Tables",
-      cls: "mod-cta"
-    });
-    refresh_button.disabled = this.context_tables_loading;
-    refresh_button.addEventListener("click", () => {
-      void this.refreshContextTables(true);
-    });
-    const tables = this.context_tables ?? {
-      vault_map: [],
-      categories: [],
-      change_log: [],
-      questions: []
-    };
-    if (this.context_tables_loading && !this.context_tables) {
-      tables_section.createDiv({
-        cls: "ollama-shell__message-meta",
-        text: "Loading SQL tables..."
-      });
-      return;
-    }
-    this.renderSqlTable(tables_section, "vault_map", tables.vault_map);
-    this.renderSqlTable(tables_section, "categories", tables.categories);
-    this.renderSqlTable(tables_section, "change_log", tables.change_log);
-    this.renderSqlTable(tables_section, "questions", tables.questions);
+    );
+    this.renderCollapsibleCard(
+      container,
+      "context_categories",
+      "Category Coverage",
+      "Top runtime categories and their current note membership counts.",
+      (body) => {
+        const category_rows = this.context_tables?.categories.filter((row) => row.source === "ai").slice(0, 8) ?? [];
+        if (!category_rows.length) {
+          body.createDiv({
+            cls: "ollama-shell__empty-state ollama-shell__empty-state--compact",
+            text: "No category data loaded yet. Refresh the SQL tables or reindex the runtime."
+          });
+          return;
+        }
+        const category_grid = body.createDiv({
+          cls: "ollama-shell__context-grid"
+        });
+        for (const row of category_rows) {
+          const card = category_grid.createDiv({
+            cls: "ollama-shell__context-stat ollama-shell__context-stat--category"
+          });
+          card.createEl("span", {
+            cls: "ollama-shell__message-meta",
+            text: "Category"
+          });
+          card.createEl("div", {
+            cls: "ollama-shell__context-stat-value",
+            text: this.formatSqlCell(row.name)
+          });
+          card.createEl("div", {
+            cls: "ollama-shell__message-meta",
+            text: `${this.formatSqlCell(row.count)} notes`
+          });
+        }
+      }
+    );
+    this.renderCollapsibleCard(
+      container,
+      "context_tables",
+      "SQLite Tables",
+      "Live snapshots from the runtime database.",
+      (body) => {
+        const refresh_button = body.createEl("button", {
+          text: this.context_tables_loading ? "Refreshing..." : "Refresh Tables",
+          cls: "mod-cta"
+        });
+        refresh_button.disabled = this.context_tables_loading;
+        refresh_button.addEventListener("click", () => {
+          void this.refreshContextTables(true);
+        });
+        const tables = this.context_tables ?? {
+          vault_map: [],
+          categories: [],
+          change_log: [],
+          questions: []
+        };
+        if (this.context_tables_loading && !this.context_tables) {
+          body.createDiv({
+            cls: "ollama-shell__message-meta",
+            text: "Loading SQL tables..."
+          });
+          return;
+        }
+        this.renderSqlTable(body, "vault_map", tables.vault_map);
+        this.renderSqlTable(body, "categories", tables.categories);
+        this.renderSqlTable(body, "change_log", tables.change_log);
+        this.renderSqlTable(body, "questions", tables.questions);
+      }
+    );
   }
   renderSqlTable(container, table_name, rows) {
     const block = container.createDiv({ cls: "ollama-shell__context-block" });
@@ -1302,6 +1328,51 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
       text: value
     });
   }
+  renderCollapsibleCard(container, key, title, subtitle, render_body, prefix) {
+    const section = container.createDiv({
+      cls: "ollama-shell__context-section ollama-shell__card-section"
+    });
+    const toggle = section.createEl("button", {
+      cls: "ollama-shell__card-toggle"
+    });
+    if (prefix) {
+      toggle.appendChild(prefix);
+    }
+    const title_wrap = toggle.createDiv({
+      cls: "ollama-shell__card-title-wrap"
+    });
+    title_wrap.createEl("strong", { text: title });
+    toggle.createEl("span", {
+      cls: "ollama-shell__card-chevron",
+      text: this.section_open[key] ? "\u2212" : "+"
+    });
+    toggle.addEventListener("click", () => {
+      this.section_open[key] = !this.section_open[key];
+      this.render();
+    });
+    if (!this.section_open[key]) {
+      return;
+    }
+    const body = section.createDiv({ cls: "ollama-shell__card-body" });
+    body.createDiv({
+      cls: "ollama-shell__message-meta ollama-shell__card-subtitle",
+      text: subtitle
+    });
+    render_body(body);
+  }
+  renderStatusDot() {
+    const dot = document.createElement("span");
+    dot.className = `ollama-shell__status-dot ollama-shell__status-dot--${this.status_tone === "ok" ? "ok" : "error"}`;
+    return dot;
+  }
+  renderPanelHeading(container, title, subtitle) {
+    const header = container.createDiv({ cls: "ollama-shell__panel-heading" });
+    header.createEl("h3", { text: title });
+    header.createEl("div", {
+      cls: "ollama-shell__message-meta",
+      text: subtitle
+    });
+  }
   renderChatTools(container, active_chat) {
     const tools_header = container.createDiv({
       cls: "ollama-shell__tool-header"
@@ -1324,7 +1395,6 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
         cls: "ollama-shell__tool-menu"
       });
       const items = [
-        { id: "quick_entry", label: "Quick Entry" },
         { id: "vault_action", label: "Vault Action Plan" },
         { id: "kanban_action", label: "Kanban Action Plan" },
         { id: "agent_action", label: "Agent Action Plan" }
@@ -1688,7 +1758,7 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
       cls: "ollama-shell__composer-actions"
     });
     const reference_button = composer_actions.createEl("button", {
-      text: "@+",
+      text: "@Specify Context",
       cls: "ollama-shell__attach-button"
     });
     reference_button.disabled = this.is_busy || !active_chat;
@@ -1728,11 +1798,40 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     }
   }
   renderMetaRow(container, label, value, tone = "neutral") {
+    const copy_on_click = [
+      "Runtime URL",
+      "Vault path",
+      "Database path"
+    ].includes(label);
     const row = container.createDiv({
-      cls: `ollama-shell__status ollama-shell__status--${tone}`
+      cls: `ollama-shell__status ollama-shell__status--${tone}${copy_on_click ? " ollama-shell__status--copyable" : ""}`
     });
-    row.createSpan({ text: label });
-    row.createEl("code", { text: value });
+    row.createSpan({
+      cls: "ollama-shell__status-label",
+      text: label
+    });
+    row.createDiv({
+      cls: "ollama-shell__status-value",
+      text: copy_on_click ? this.truncateCardValue(value) : value,
+      attr: copy_on_click ? { title: value } : void 0
+    });
+    if (copy_on_click) {
+      row.addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          new import_obsidian2.Notice(`${label} copied to clipboard.`);
+        } catch {
+          new import_obsidian2.Notice(`Could not copy ${label.toLowerCase()}.`);
+        }
+      });
+    }
+  }
+  truncateCardValue(value, max_length = 68) {
+    const normalized = value.replace(/\s+/g, " ").trim();
+    if (normalized.length <= max_length) {
+      return normalized;
+    }
+    return `${normalized.slice(0, max_length - 1)}\u2026`;
   }
   getEffectiveModel(active_chat) {
     return active_chat?.model_override.trim() || this.plugin.settings.defaultModel;
@@ -1819,14 +1918,20 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
     }
   }
   async refreshHealth() {
-    this.is_busy = true;
+    if (this.health_check_inflight) {
+      return;
+    }
+    this.health_check_inflight = true;
     this.status_text = "Checking...";
     this.status_tone = "neutral";
     this.error_text = "";
     this.render();
     try {
       const health = await getRuntimeHealth(this.plugin.settings.runtimeUrl);
-      if (health.ollama_reachable) {
+      if (health.indexing) {
+        this.status_text = "Indexing...";
+        this.status_tone = "warn";
+      } else if (health.ollama_reachable) {
         this.status_text = "Connected";
         this.status_tone = "ok";
       } else {
@@ -1839,9 +1944,8 @@ var OllamaRuntimeView = class extends import_obsidian2.ItemView {
       this.status_text = "Offline";
       this.status_tone = "error";
       this.error_text = this.getErrorMessage(error);
-      new import_obsidian2.Notice(this.getErrorMessage(error));
     } finally {
-      this.is_busy = false;
+      this.health_check_inflight = false;
       this.render();
     }
   }
